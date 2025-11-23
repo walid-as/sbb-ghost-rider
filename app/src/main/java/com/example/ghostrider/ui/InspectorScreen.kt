@@ -1,4 +1,4 @@
-package com.example.anonticketdemo
+package com.example.ghostrider.ui
 
 import android.app.Activity
 import androidx.compose.foundation.layout.*
@@ -21,7 +21,8 @@ fun InspectorScreen() {
 
   var isReading by remember { mutableStateOf(false) }
   var statusMessage by remember { mutableStateOf("Tap 'Start NFC Reader' to begin") }
-  var lastResult by remember { mutableStateOf<VerificationResult?>(null) }
+  var showVerificationDialog by remember { mutableStateOf(false) }
+  var currentResult by remember { mutableStateOf<VerificationResult?>(null) }
 
   var nfcReader by remember { mutableStateOf<NfcReader?>(null) }
 
@@ -54,7 +55,8 @@ fun InspectorScreen() {
                   NfcReader(
                       activity = activity,
                       onResult = { result ->
-                        lastResult = result
+                        currentResult = result
+                        showVerificationDialog = true
                         statusMessage =
                             if (result.isValid) {
                               "✓ Ticket VALID"
@@ -90,62 +92,64 @@ fun InspectorScreen() {
 
       Spacer(modifier = Modifier.height(16.dp))
 
-      lastResult?.let { result -> VerificationResultCard(result) }
-
-      Spacer(modifier = Modifier.height(16.dp))
-
       Text(
           text =
               """
               Instructions:
               1. Ensure both devices have NFC enabled
-              2. Client device should have a ticket "In Wallet"
+              2. Client enables NFC toggle on a ticket
               3. Inspector taps "Start NFC Reader"
               4. Hold devices back-to-back
-              5. Wait for verification result
+              5. Verification popup appears automatically
               """
                   .trimIndent(),
           style = MaterialTheme.typography.bodySmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
       )
     }
+
+    // Verification Result Dialog
+    if (showVerificationDialog && currentResult != null) {
+      VerificationDialog(result = currentResult!!, onDismiss = { showVerificationDialog = false })
+    }
   }
 }
 
 @Composable
-fun VerificationResultCard(result: VerificationResult) {
-  val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm:ss", Locale.getDefault())
+fun VerificationDialog(result: VerificationResult, onDismiss: () -> Unit) {
+  val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy HH:mm:ss", Locale.getDefault()) }
 
-  Card(
-      modifier = Modifier.fillMaxWidth(),
-      colors =
-          CardDefaults.cardColors(
-              containerColor =
-                  if (result.isValid) {
-                    MaterialTheme.colorScheme.primaryContainer
-                  } else {
-                    MaterialTheme.colorScheme.errorContainer
-                  }
-          ),
-  ) {
-    Column(modifier = Modifier.padding(16.dp)) {
-      Text(
-          text = if (result.isValid) "✓ VALID TICKET" else "✗ INVALID TICKET",
-          style = MaterialTheme.typography.titleLarge,
-          color =
-              if (result.isValid) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-              } else {
-                MaterialTheme.colorScheme.onErrorContainer
-              },
-      )
-
-      Spacer(modifier = Modifier.height(12.dp))
-
-      Text(text = "Ticket ID: ${result.ticketId.take(16)}...")
-      Text(text = "Challenge: ${result.challenge}")
-      Text(text = "Location: ${result.location}")
-      Text(text = "Time: ${dateFormat.format(Date(result.timestamp))}")
-    }
-  }
+  AlertDialog(
+      onDismissRequest = onDismiss,
+      containerColor =
+          if (result.isValid) {
+            MaterialTheme.colorScheme.primaryContainer
+          } else {
+            MaterialTheme.colorScheme.errorContainer
+          },
+      title = {
+        Text(
+            text = if (result.isValid) "✓ VALID TICKET" else "✗ INVALID TICKET",
+            style = MaterialTheme.typography.headlineMedium,
+            color =
+                if (result.isValid) {
+                  MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                  MaterialTheme.colorScheme.onErrorContainer
+                },
+        )
+      },
+      text = {
+        Column {
+          Text("Ticket ID: ${result.ticketId.take(16)}...")
+          Spacer(modifier = Modifier.height(4.dp))
+          Text("Challenge: ${result.challenge}")
+          Spacer(modifier = Modifier.height(4.dp))
+          Text("Location: ${result.location}")
+          Spacer(modifier = Modifier.height(4.dp))
+          Text("Time: ${dateFormat.format(Date(result.timestamp))}")
+        }
+      },
+      confirmButton = { Button(onClick = onDismiss) { Text("Close") } },
+  )
 }

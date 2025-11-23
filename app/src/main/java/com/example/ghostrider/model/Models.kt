@@ -8,7 +8,9 @@ data class Ticket(
     val acc: BigInteger,
     val P: BigInteger,
     val timestamp: Long = System.currentTimeMillis(),
-    val addedToWallet: Boolean = false
+    val addedToWallet: Boolean = false,
+    val nfcEnabled: Boolean = false,
+    val publicKeys: List<BigInteger> = listOf(P)  // All registered keys
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -28,5 +30,6 @@ data class VerificationResult(
     val isValid: Boolean,
     val challenge: String,
     val timestamp: Long,
-    val location: String
+    val location: String,
+    val matchedKeyIndex: Int = -1
 )

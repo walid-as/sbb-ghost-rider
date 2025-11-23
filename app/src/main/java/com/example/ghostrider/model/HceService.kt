@@ -5,14 +5,6 @@ import android.os.Bundle
 import android.util.Log
 import java.math.BigInteger
 
-/**
- * HCE Service that responds to Inspector NFC reads.
- *
- * Protocol:
- * 1. Inspector sends SELECT AID (F0010203040506)
- * 2. Inspector sends INS=0xA1 -> Service responds with ticketId
- * 3. Inspector sends INS=0xA2 with challenge c (32 bytes) -> Service responds with (S, R)
- */
 class HceService : HostApduService() {
 
     companion object {
@@ -40,58 +32,60 @@ class HceService : HostApduService() {
     override fun processCommandApdu(commandApdu: ByteArray, extras: Bundle?): ByteArray {
         Log.d(TAG, "Received APDU: ${commandApdu.joinToString(" ") { "%02X".format(it) }}")
 
-        // Handle SELECT AID
         if (commandApdu.size >= 5 && isSelectAidApdu(commandApdu)) {
             Log.d(TAG, "SELECT AID received")
-            currentTicket = Storage.getActiveTicket()
+            currentTicket = Storage.getNfcActiveTicket() // ← Use NFC-enabled ticket
             if (currentTicket == null) {
-                Log.w(TAG, "No active ticket in wallet")
+                Log.w(TAG, "No ticket with NFC enabled")
                 return FAILURE
             }
-            Log.d(TAG, "Active ticket: ${currentTicket?.ticketId}")
+            Log.d(TAG, "Active NFC ticket: ${currentTicket?.ticketId}")
             return SUCCESS
         }
 
-        // Handle GET TICKET ID (INS=0xA1)
+        // After: send ticketId length, ticketId bytes, P length, P bytes
         if (commandApdu.size >= 4 && commandApdu[1] == INS_GET_TICKET_ID) {
             Log.d(TAG, "GET_TICKET_ID request")
             val ticket = currentTicket ?: return FAILURE
-            val ticketIdBytes = ticket.ticketId.toByteArray()
-            return ticketIdBytes + SUCCESS
+
+            val ticketIdBytes = ticket.ticketId.toByteArray(Charsets.UTF_8)
+            val pBytes = ticket.P.toByteArray()
+
+            val out = mutableListOf<Byte>()
+            out.add(ticketIdBytes.size.toByte())
+            out.addAll(ticketIdBytes.toList())
+            out.add(((pBytes.size ushr 8) and 0xFF).toByte())
+            out.add((pBytes.size and 0xFF).toByte())
+            out.addAll(pBytes.toList())
+
+            return out.toByteArray() + SUCCESS
         }
 
-        // Handle CHALLENGE (INS=0xA2)
+
         if (commandApdu.size >= 37 && commandApdu[1] == INS_CHALLENGE) {
             Log.d(TAG, "CHALLENGE request")
             val ticket = currentTicket ?: return FAILURE
 
-            // Extract challenge (32 bytes starting at index 5)
             val challengeBytes = commandApdu.copyOfRange(5, 37)
-            val challenge = BigInteger(1, challengeBytes)
+            val challenge = BigInteger(1, challengeBytes).mod(CryptoHelper.q)
 
             Log.d(TAG, "Challenge: ${challenge.toString(16)}")
 
-            // Generate Schnorr signature
             val (S, R) = CryptoHelper.generateSchnorrSignature(ticket.acc, challenge)
 
-            // Serialize (S, R) as TLV: len(S)|S|len(R)|R
             val sBytes = S.toByteArray()
             val rBytes = R.toByteArray()
 
             val response = ByteArray(4 + sBytes.size + rBytes.size)
             var offset = 0
 
-            // S length (2 bytes)
             response[offset++] = ((sBytes.size shr 8) and 0xFF).toByte()
             response[offset++] = (sBytes.size and 0xFF).toByte()
-            // S data
             System.arraycopy(sBytes, 0, response, offset, sBytes.size)
             offset += sBytes.size
 
-            // R length (2 bytes)
             response[offset++] = ((rBytes.size shr 8) and 0xFF).toByte()
             response[offset++] = (rBytes.size and 0xFF).toByte()
-            // R data
             System.arraycopy(rBytes, 0, response, offset, rBytes.size)
 
             Log.d(TAG, "Sending signature response (${response.size + 2} bytes)")
